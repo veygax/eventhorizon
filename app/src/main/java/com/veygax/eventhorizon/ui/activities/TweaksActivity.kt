@@ -446,6 +446,9 @@ fun TweaksScreen(
     val initialInterceptorState = getInitialState("intercept_startup_apps")
     var isInterceptorEnabled by remember { mutableStateOf(initialInterceptorState) }
 
+    // Telemetry Disable
+    var isTelemetryDisabled by rememberSaveable { mutableStateOf(sharedPrefs.getBoolean(TweakCommands.TELEMETRY_TOGGLE_KEY, false))}
+
     // Startup Hang/Blackscreen Fix
     var cycleWifiOnBoot by rememberSaveable { mutableStateOf(getInitialState("cycle_wifi_on_boot")) }
 
@@ -1061,6 +1064,36 @@ fun TweaksScreen(
                             enabled = isRooted
                         )
                     }
+                    TweakCard(
+                        title = "Disable Meta Telemetry",
+                        description = "Patches and mount binds over the telemetry binary"
+                    ) {
+                        Switch(
+                            checked = isTelemetryDisabled,
+                            onCheckedChange = { isEnabled ->
+                                isTelemetryDisabled = isEnabled
+                                sharedPrefs.edit().putBoolean(TweakCommands.TELEMETRY_TOGGLE_KEY, isEnabled).apply()
+
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    if (isRooted) {
+                                        if (isEnabled) {
+                                            RootUtils.runAsRoot(TweakCommands.PREPARE_TELEMETRY_FILE_IF_NEEDED, useMountMaster = true)
+                                            RootUtils.runAsRoot(TweakCommands.ENABLE_TELEMETRY_DISABLE, useMountMaster = true)
+                                            withContext(Dispatchers.Main) {
+                                                snackbarHostState.showSnackbar("Telemetry Disabled")
+                                            }
+                                        } else {
+                                            RootUtils.runAsRoot(TweakCommands.DISABLE_TELEMETRY_DISABLE, useMountMaster = true)
+                                            withContext(Dispatchers.Main) {
+                                                snackbarHostState.showSnackbar("Telemetry Enabled")
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = isRooted
+                        )
+                    }
                     TweakCard("System Hang Fix", "Turns Wi-Fi off and on during boot to prevent the system from hanging in certain conditions") {
                         Switch(
                             checked = cycleWifiOnBoot,
@@ -1536,6 +1569,19 @@ object TweakCommands {
     const val SET_TRANSITION_VOID = "oculuspreferences --setc shell_immersive_transitions_enabled false\nam force-stop com.oculus.vrshell"
     const val ENABLE_INFINITE_PANELS = "oculuspreferences --setc debug_infinite_spatial_panels_enabled true\nam force-stop com.oculus.vrshell"
     const val DISABLE_INFINITE_PANELS = "oculuspreferences --setc debug_infinite_spatial_panels_enabled false\nam force-stop com.oculus.vrshell"
+
+    // --- Anti TELEMETRY
+    const val TELEMETRY_TOGGLE_KEY = "telemetry_toggle_enabled"
+    const val PREPARE_TELEMETRY_FILE_IF_NEEDED = 
+        "FILE=/data/adb/eventhorizon/telemetry; " +
+        "if [ ! -f \$FILE ]; then " +
+            "mkdir -p /data/adb/eventhorizon && " +
+            "cp /system_ext/bin/telemetry \$FILE && " +
+            "FILE_SIZE=\$(stat -c %s \$FILE) && " +
+            "dd if=/dev/zero of=\$FILE bs=1 seek=16 count=\$((\$FILE_SIZE - 16)) conv=notrunc; " +
+        "fi"
+    const val ENABLE_TELEMETRY_DISABLE = "mount -o bind /data/adb/eventhorizon/telemetry /system_ext/bin/telemetry"
+    const val DISABLE_TELEMETRY_DISABLE = "umount /system_ext/bin/telemetry"
 }
 
 @Preview(showBackground = true)
